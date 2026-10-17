@@ -1,0 +1,6 @@
+
+debug/
+target/
+/data/
+/report.html
+__pycache__/

@@ -1,0 +1,28 @@
+[package]
+name = "hothash"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+description = "A fast, non-cryptographic hash function for the hot path on modern x86-64 CPUs."
+keywords = ["hash", "hasher", "vaes", "avx512", "no_std"]
+categories = ["algorithms", "no-std"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Bobface/hothash"
+include = ["/src", "/README.md", "/LICENSE-MIT", "/LICENSE-APACHE"]
+
+[package.metadata.docs.rs]
+rustc-args = ["-C", "target-feature=+avx512f,+avx512bw,+avx512vl,+vaes,+aes,+bmi2"]
+rustdoc-args = ["-C", "target-feature=+avx512f,+avx512bw,+avx512vl,+vaes,+aes,+bmi2"]
+
+[features]
+default = ["std"]
+std = []
+
+[dependencies]
+
+[dev-dependencies]
+libc = "0.2"
+
+[profile.release]
+codegen-units = 1
+lto = "fat"

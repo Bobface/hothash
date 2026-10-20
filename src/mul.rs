@@ -188,21 +188,34 @@ fn fin(keys: &Keys, lo: u64, hi: u64) -> u64 {
 }
 
 #[inline(always)]
-pub(crate) fn hash_ints(keys: &Keys, words: [u64; 4], count: usize, len: usize, tweak: u64) -> u64 {
+pub(crate) fn fold_in(keys: &Keys, word: u64, value: u64) -> u64 {
+    word.wrapping_mul(keys.words[FIN_KEY] | 1) ^ value
+}
+
+#[inline(always)]
+pub(crate) fn hash_ints(keys: &Keys, words: &[u64; 8], count: usize, len: usize, tweak: u64) -> u64 {
+    let len_key = (len as u64).wrapping_mul(LEN_MUL);
     let (first, last) = match count {
         0 if tweak == 0 => return keys.empty,
         0 => (0, 0),
         1 if len <= 3 => (words[0], words[0].rotate_right(22)),
         1 => (words[0], words[0]),
-        2 => (words[1], words[0]),
+        2 => (words[0], words[1]),
+        3 | 4 => {
+            let (lo0, hi0) = wide_mul(words[0] ^ keys.words[0], words[(count - 2) & 7] ^ opaque(keys.words[1] ^ len_key) ^ tweak);
+            let (lo1, hi1) = wide_mul(words[1] ^ keys.words[2], words[(count - 1) & 7] ^ keys.words[3]);
+            return opaque(lo0 ^ lo1) ^ opaque(hi0 ^ hi1);
+        }
         _ => {
-            let (first0, first1, last0) = if count == 3 { (words[2], words[1], words[1]) } else { (words[3], words[2], words[1]) };
-            let (lo0, hi0) = wide_mul(first0 ^ keys.words[0], last0 ^ opaque(keys.words[1] ^ (len as u64).wrapping_mul(LEN_MUL)) ^ tweak);
-            let (lo1, hi1) = wide_mul(first1 ^ keys.words[2], words[0] ^ keys.words[3]);
+            let tail = count - 4;
+            let (lo0, hi0) = wide_mul(words[0] ^ keys.words[0], words[1] ^ opaque(keys.words[1] ^ len_key) ^ tweak);
+            let (lo0, hi0) = wide_mul(words[tail & 7] ^ lo0, words[(tail + 1) & 7] ^ hi0);
+            let (lo1, hi1) = wide_mul(words[2] ^ keys.words[2], words[3] ^ keys.words[3]);
+            let (lo1, hi1) = wide_mul(words[(tail + 2) & 7] ^ lo1, words[(tail + 3) & 7] ^ hi1);
             return opaque(lo0 ^ lo1) ^ opaque(hi0 ^ hi1);
         }
     };
-    let (prod_lo, prod_hi) = wide_mul(first ^ keys.words[0], last ^ opaque(keys.words[1] ^ (len as u64).wrapping_mul(LEN_MUL)) ^ tweak);
+    let (prod_lo, prod_hi) = wide_mul(first ^ keys.words[0], last ^ opaque(keys.words[1] ^ len_key) ^ tweak);
     prod_lo ^ prod_hi
 }
 

@@ -80,7 +80,7 @@ impl<K: Borrow<Keys>> core::hash::Hasher for Hasher<K> {
 
     #[inline(always)]
     fn write_u8(&mut self, i: u8) {
-        self.state.int(self.keys.borrow(), i as u64, 1);
+        self.state.byte(self.keys.borrow(), i);
     }
 
     #[inline(always)]
@@ -117,7 +117,7 @@ impl<K: Borrow<Keys>> core::hash::Hasher for Hasher<K> {
 #[derive(Clone, Copy)]
 struct State {
     acc: u64,
-    words: [u64; 4],
+    words: [u64; 8],
     count: usize,
     fill: usize,
     len: usize,
@@ -128,25 +128,20 @@ struct State {
 impl State {
     #[inline(always)]
     fn new() -> State {
-        State { acc: 0, words: [0; 4], count: 0, fill: 0, len: 0, absorbed: false, after_bytes: false }
+        State { acc: 0, words: [0; 8], count: 0, fill: 0, len: 0, absorbed: false, after_bytes: false }
     }
 
     #[inline(always)]
     fn clear(&mut self) {
-        self.words = [0; 4];
+        self.words = [0; 8];
         self.count = 0;
         self.fill = 0;
         self.len = 0;
     }
 
     #[inline(always)]
-    fn terminator(&self) -> bool {
-        self.len == 1 && self.after_bytes && self.words[0] == 0xff
-    }
-
-    #[inline(always)]
     fn flush(&mut self, keys: &Keys) {
-        self.acc = absorb(keys, self.acc, self.len << 3 | self.count, self.words[0], self.words[1], self.words[2], self.words[3]);
+        self.acc = absorb(keys, &self.words, self.len << 4 | self.count.min(8), self.acc);
         self.clear();
         self.absorbed = true;
         self.after_bytes = false;
@@ -154,18 +149,25 @@ impl State {
 
     #[inline(always)]
     fn int(&mut self, keys: &Keys, value: u64, size: usize) {
-        if self.count > 0 && self.fill + size <= 8 {
-            self.words[0] |= value << (8 * self.fill);
+        if size < 8 && self.count > 0 && self.fill + size <= 8 {
+            self.words[(self.count - 1) & 7] ^= value << (8 * self.fill);
             self.fill += size;
         } else {
-            if self.count == 4 {
-                self.flush(keys);
-            }
-            self.words = [value, self.words[0], self.words[1], self.words[2]];
+            self.words[self.count & 7] = mul::fold_in(&keys.mul, self.words[self.count & 7], value);
             self.count += 1;
             self.fill = size;
         }
         self.len += size;
+        self.after_bytes = false;
+    }
+
+    #[inline(always)]
+    fn byte(&mut self, keys: &Keys, value: u8) {
+        if self.after_bytes && value == 0xff {
+            self.after_bytes = false;
+        } else {
+            self.int(keys, value as u64, 1);
+        }
     }
 
     #[inline(always)]
@@ -177,7 +179,7 @@ impl State {
     #[inline(always)]
     fn bytes(&mut self, keys: &Keys, data: &[u8]) {
         if self.count > 0 {
-            if (self.count == 1 && self.len == 8 && self.words[0] == data.len() as u64) || self.terminator() {
+            if self.count == 1 && self.len == 8 && self.words[0] == data.len() as u64 {
                 self.clear();
             } else {
                 self.flush(keys);
@@ -190,16 +192,16 @@ impl State {
 
     #[inline(always)]
     fn finish(&self, keys: &Keys) -> u64 {
-        if self.absorbed && (self.count == 0 || self.terminator()) {
+        if self.absorbed && self.count == 0 {
             return self.acc;
         }
-        mul::hash_ints(&keys.mul, self.words, self.count, self.len, self.acc)
+        mul::hash_ints(&keys.mul, &self.words, self.count.min(8), self.len, self.acc)
     }
 }
 
 #[inline(never)]
-fn absorb(keys: &Keys, acc: u64, shape: usize, w0: u64, w1: u64, w2: u64, w3: u64) -> u64 {
-    mul::hash_ints(&keys.mul, [w0, w1, w2, w3], shape & 7, shape >> 3, acc)
+fn absorb(keys: &Keys, words: &[u64; 8], shape: usize, acc: u64) -> u64 {
+    mul::hash_ints(&keys.mul, words, shape & 15, shape >> 4, acc)
 }
 
 #[inline(always)]
